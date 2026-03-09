@@ -21,5 +21,5 @@ func main() {
 
 func RegisterRoutes(server *gin.Engine) {
 	server.POST("/create", controllers.CreateRoom)
-
+	server.GET("/join/room/:room_code/:name", controllers.JoinRoom)
 }

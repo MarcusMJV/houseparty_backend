@@ -5,8 +5,9 @@ import (
 )
 
 type Room struct {
-	Code     string `json:"code"`
-	HostName string `json:"host_name"`
+	Code     string
+	HostName string
+	Clients  map[*Client]bool
 }
 
 const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
