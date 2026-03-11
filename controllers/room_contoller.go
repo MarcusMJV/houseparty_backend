@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/marcusvorster/houseparty_backend/config"
 	"github.com/marcusvorster/houseparty_backend/room"
 )
 
@@ -32,6 +33,16 @@ func CreateRoom(context *gin.Context) {
 
 	code := roomManager.CreateRoom().Code
 	context.JSON(http.StatusCreated, gin.H{"message": "room created", "room_code": code})
+}
+
+func SpotifyExchange(context *gin.Context) {
+	code := context.Param("code")
+	token, err := config.SetSpotifyToken(code)
+	if err != nil {
+		context.JSON(http.StatusInternalServerError, gin.H{"message": "error getting token", "error": err.Error()})
+		return
+	}
+	context.JSON(http.StatusOK, gin.H{"message": "exchanged", "token": token})
 }
 
 func JoinRoom(context *gin.Context) {

@@ -14,8 +14,7 @@ func LoadEnv() {
 	}
 }
 
-func GetFrontendURL() string {
-	url := os.Getenv("FRONTEND_URL")
-
+func GetFrontendCallback() string {
+	url := os.Getenv("FRONTEND_CALLBACK")
 	return url
 }
