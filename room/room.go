@@ -2,12 +2,16 @@ package room
 
 import (
 	"math/rand"
+
+	"github.com/marcusvorster/houseparty_backend/spotify"
 )
 
 type Room struct {
-	Code     string
-	HostName string
-	Clients  map[*Client]bool
+	Code        string
+	HostName    string
+	Clients     map[*Client]bool
+	CurrentSong spotify.Song
+	Playlist    []spotify.Song
 }
 
 const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

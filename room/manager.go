@@ -71,6 +71,8 @@ func NewRoomManager() *RoomManager {
 
 func (m *RoomManager) SetupEventHandlers() {
 	m.Handlers["join-room"] = JoinRoomEvent
+	m.Handlers["search-song"] = SearchSongEvent
+	m.Handlers["add-song"] = AddSong
 }
 
 func (m *RoomManager) ServeWS() gin.HandlerFunc {
@@ -92,7 +94,7 @@ func checkOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 
 	switch origin {
-	case "http://localhost:5173":
+	case "https://localhost:5173":
 		return true
 	case "https://hp-frontend.up.railway.app":
 		return true

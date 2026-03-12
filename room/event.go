@@ -1,6 +1,12 @@
 package room
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/marcusvorster/houseparty_backend/config"
+	"github.com/marcusvorster/houseparty_backend/spotify"
+)
 
 type Event struct {
 	Type    string          `json:"type"`
@@ -16,6 +22,19 @@ type JoinedRoomPayload struct {
 
 type UserJoinedPayload struct {
 	Name string `json:"name"`
+}
+
+type SearchSongPayload struct {
+	Songs []spotify.Song `json:"songs"`
+}
+
+type AddToPlaylistPayload struct {
+	Song spotify.Song `json:"song"`
+}
+
+type SetSongPayload struct {
+	Song  spotify.Song `json:"song"`
+	Token string       `json:"token"`
 }
 
 func JoinRoomEvent(event Event, c *Client) error {
@@ -57,6 +76,91 @@ func JoinRoomEvent(event Event, c *Client) error {
 	for member, ok := range room.Clients {
 		if ok && member != c {
 			member.Egress <- userJoinedEvent
+		}
+	}
+
+	return nil
+}
+
+func SearchSongEvent(event Event, c *Client) error {
+	var searchPayload struct {
+		Search string `json:"search"`
+	}
+
+	err := json.Unmarshal(event.Payload, &searchPayload)
+	if err != nil {
+		return err
+	}
+
+	songs, err := spotify.SearchSong(searchPayload.Search)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(SearchSongPayload{
+		Songs: songs,
+	})
+	if err != nil {
+		return err
+	}
+
+	event = Event{
+		Type:    "searched_song",
+		Payload: payload,
+	}
+
+	c.Egress <- event
+	return nil
+
+}
+
+func AddSong(event Event, c *Client) error {
+	var song spotify.Song
+	room := c.Manager.Rooms[c.RoomCode]
+
+	token, err := config.GetAccessToken()
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+
+	err = json.Unmarshal(event.Payload, &song)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
+
+	if room.CurrentSong.Id == "" {
+		payload, err := json.Marshal(SetSongPayload{Song: song, Token: token})
+		if err != nil {
+			fmt.Println(err.Error())
+			return err
+		}
+
+		event = Event{
+			Type:    "set_song",
+			Payload: payload,
+		}
+
+		room.CurrentSong = song
+
+		for member := range room.Clients {
+			member.Egress <- event
+		}
+	} else {
+		room.Playlist = append(room.Playlist, song)
+		payload, err := json.Marshal(AddToPlaylistPayload{Song: song})
+		if err != nil {
+			return err
+		}
+
+		event = Event{
+			Type:    "update_playlist",
+			Payload: payload,
+		}
+
+		for member := range room.Clients {
+			member.Egress <- event
 		}
 	}
 
