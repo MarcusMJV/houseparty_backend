@@ -36,7 +36,7 @@ func GetAccessToken() (string, error) {
 		return refreshAccessToken()
 	}
 
-	expiry := spotifyAuth.IssuedAt.Add(time.Duration(spotifyAuth.ExpiresIn) * time.Second)
+	expiry := spotifyAuth.IssuedAt.Add(time.Duration(spotifyAuth.ExpiresIn)*time.Second - 15*time.Minute)
 
 	if time.Now().After(expiry) {
 		return refreshAccessToken()

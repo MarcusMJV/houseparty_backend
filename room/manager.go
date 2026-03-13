@@ -73,6 +73,7 @@ func (m *RoomManager) SetupEventHandlers() {
 	m.Handlers["join-room"] = JoinRoomEvent
 	m.Handlers["search-song"] = SearchSongEvent
 	m.Handlers["add-song"] = AddSong
+	m.Handlers["song-ended"] = SongEnded
 }
 
 func (m *RoomManager) ServeWS() gin.HandlerFunc {

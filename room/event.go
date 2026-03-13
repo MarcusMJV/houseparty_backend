@@ -37,6 +37,10 @@ type SetSongPayload struct {
 	Token string       `json:"token"`
 }
 
+type AuthTokenPayload struct {
+	Token string `json:"token"`
+}
+
 func JoinRoomEvent(event Event, c *Client) error {
 	room := c.GetClientRoom()
 	var members []string
@@ -130,7 +134,7 @@ func AddSong(event Event, c *Client) error {
 		return err
 	}
 
-	if room.CurrentSong.Id == "" {
+	if room.CurrentSong == nil {
 		payload, err := json.Marshal(SetSongPayload{Song: song, Token: token})
 		if err != nil {
 			fmt.Println(err.Error())
@@ -142,7 +146,7 @@ func AddSong(event Event, c *Client) error {
 			Payload: payload,
 		}
 
-		room.CurrentSong = song
+		room.CurrentSong = &song
 
 		for member := range room.Clients {
 			member.Egress <- event
@@ -162,6 +166,16 @@ func AddSong(event Event, c *Client) error {
 		for member := range room.Clients {
 			member.Egress <- event
 		}
+	}
+
+	return nil
+}
+
+func SongEnded(event Event, c *Client) error {
+	room := c.Manager.Rooms[c.RoomCode]
+	err := room.HandleSongChange()
+	if err != nil {
+		return err
 	}
 
 	return nil
