@@ -1,9 +1,11 @@
 package room
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -28,8 +30,10 @@ func (m *RoomManager) CreateRoom() *Room {
 	code := GenerateRoomCode(5)
 
 	room := &Room{
-		Code:    code,
-		Clients: make(map[*Client]bool),
+		Code:            code,
+		Clients:         make(map[*Client]bool),
+		ClientHistory:   make(map[string]string),
+		ReconnectTimers: make(map[string]*time.Timer),
 	}
 
 	m.mu.Lock()
@@ -43,20 +47,75 @@ func (m *RoomManager) AddClient(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.Rooms[client.RoomCode].Clients[client] = true
+	room := m.Rooms[client.RoomCode]
+
+	// Cancel any pending reconnect timer for this client ID
+	if timer, ok := room.ReconnectTimers[client.ID]; ok {
+		timer.Stop()
+		delete(room.ReconnectTimers, client.ID)
+	}
+
+	if len(room.Clients) == 0 {
+		room.HostID = client.ID
+	}
+
+	room.Clients[client] = true
 }
 
 func (m *RoomManager) RemoveClient(client *Client) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	room := m.Rooms[client.RoomCode]
 
-	if _, ok := room.Clients[client]; ok {
-		close(client.Egress)
-		client.Connection.Close()
-		delete(m.Rooms[client.RoomCode].Clients, client)
+	if _, ok := room.Clients[client]; !ok {
+		m.mu.Unlock()
+		return
 	}
 
+	close(client.Egress)
+	client.Connection.Close()
+	room.ClientHistory[client.Name] = client.ID
+	delete(room.Clients, client)
+
+	clientID := client.ID
+	clientName := client.Name
+
+	timer := time.AfterFunc(30*time.Second, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		// If client reconnected, ClientHistory entry was removed — do nothing
+		if _, pending := room.ClientHistory[clientName]; !pending {
+			return
+		}
+
+		delete(room.ClientHistory, clientName)
+		delete(room.ReconnectTimers, clientID)
+
+		payload, err := json.Marshal(UserLeftPayload{Name: clientName, ID: clientID})
+		if err != nil {
+			return
+		}
+		event := Event{Type: "user_left", Payload: payload}
+		for c := range room.Clients {
+			c.Egress <- event
+		}
+	})
+	room.ReconnectTimers[clientID] = timer
+
+	m.mu.Unlock()
+}
+
+func (m *RoomManager) CheckClientHistory(roomCode string, key string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room := m.Rooms[roomCode]
+	if id, ok := room.ClientHistory[key]; ok {
+		defer delete(room.ClientHistory, key)
+		return id, true
+	}
+
+	return "", false
 }
 
 func NewRoomManager() *RoomManager {
@@ -74,6 +133,7 @@ func (m *RoomManager) SetupEventHandlers() {
 	m.Handlers["search-song"] = SearchSongEvent
 	m.Handlers["add-song"] = AddSong
 	m.Handlers["song-ended"] = SongEnded
+	m.Handlers["song-skip-vote"] = VoteToSkipSong
 }
 
 func (m *RoomManager) ServeWS() gin.HandlerFunc {

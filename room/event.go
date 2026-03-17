@@ -3,6 +3,7 @@ package room
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/marcusvorster/houseparty_backend/config"
 	"github.com/marcusvorster/houseparty_backend/spotify"
@@ -16,16 +17,33 @@ type Event struct {
 type EventHandler func(event Event, c *Client) error
 
 type JoinedRoomPayload struct {
-	Messsage string   `json:"message"`
-	Members  []string `json:"users"`
+	Messsage             string            `json:"message"`
+	Members              map[string]string `json:"users"`
+	Host                 string            `json:"host"`
+	ClientID             string            `json:"client_id"`
+	CurrentSong          *spotify.Song     `json:"current_song"`
+	CurrentSongStartTime time.Time         `json:"current_song_start_time"`
+	SkipRecord           []string          `json:"skip_record"`
+	Playlist             []spotify.Song    `json:"playlist"`
+	Token                string            `json:"token"`
 }
 
 type UserJoinedPayload struct {
 	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+type UserLeftPayload struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
 }
 
 type SearchSongPayload struct {
 	Songs []spotify.Song `json:"songs"`
+}
+
+type VoteToSkipPayload struct {
+	User string `json:"user"`
 }
 
 type AddToPlaylistPayload struct {
@@ -43,18 +61,30 @@ type AuthTokenPayload struct {
 
 func JoinRoomEvent(event Event, c *Client) error {
 	room := c.GetClientRoom()
-	var members []string
+	members := make(map[string]string)
 
 	for member, ok := range room.Clients {
 		if ok {
-			members = append(members, member.Name)
+			members[member.Name] = member.ID
 		}
 	}
 
 	payload := JoinedRoomPayload{
-		Messsage: "Joined Room",
-		Members:  members,
+		Messsage:             "Joined Room",
+		Members:              members,
+		Host:                 room.HostID,
+		ClientID:             c.ID,
+		CurrentSong:          room.CurrentSong,
+		CurrentSongStartTime: room.CurrentSongStartTime,
+		SkipRecord:           room.SkipRecord,
+		Playlist:             room.Playlist,
 	}
+
+	token, err := config.GetAccessToken()
+	if err != nil {
+		return nil
+	}
+	payload.Token = token
 
 	marshaledPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -67,7 +97,7 @@ func JoinRoomEvent(event Event, c *Client) error {
 	}
 	c.Egress <- joinedEvent
 
-	userJoinedPayload, err := json.Marshal(UserJoinedPayload{Name: c.Name})
+	userJoinedPayload, err := json.Marshal(UserJoinedPayload{Name: c.Name, ID: c.ID})
 	if err != nil {
 		return err
 	}
@@ -120,7 +150,7 @@ func SearchSongEvent(event Event, c *Client) error {
 
 func AddSong(event Event, c *Client) error {
 	var song spotify.Song
-	room := c.Manager.Rooms[c.RoomCode]
+	room := c.GetClientRoom()
 
 	token, err := config.GetAccessToken()
 	if err != nil {
@@ -147,6 +177,7 @@ func AddSong(event Event, c *Client) error {
 		}
 
 		room.CurrentSong = &song
+		room.CurrentSongStartTime = time.Now()
 
 		for member := range room.Clients {
 			member.Egress <- event
@@ -172,8 +203,24 @@ func AddSong(event Event, c *Client) error {
 }
 
 func SongEnded(event Event, c *Client) error {
-	room := c.Manager.Rooms[c.RoomCode]
+	room := c.GetClientRoom()
 	err := room.HandleSongChange()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func VoteToSkipSong(event Event, c *Client) error {
+	var skipSongPayload VoteToSkipPayload
+	err := json.Unmarshal(event.Payload, &skipSongPayload)
+	if err != nil {
+		return err
+	}
+
+	room := c.GetClientRoom()
+	err = room.HandleSkipVote(skipSongPayload.User)
 	if err != nil {
 		return err
 	}

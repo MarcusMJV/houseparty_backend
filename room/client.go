@@ -1,6 +1,8 @@
 package room
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"time"
@@ -14,6 +16,7 @@ var (
 )
 
 type Client struct {
+	ID         string
 	Name       string
 	Connection *websocket.Conn
 	RoomCode   string
@@ -21,8 +24,24 @@ type Client struct {
 	Egress     chan Event
 }
 
+func generateClientID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		log.Println("failed to generate client ID: ", err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
 func newClient(name string, conn *websocket.Conn, roomCode string, manager *RoomManager) *Client {
+	var cleintID string
+	if id, ok := manager.CheckClientHistory(roomCode, name); ok {
+		cleintID = id
+	} else {
+		cleintID = generateClientID()
+	}
+
 	return &Client{
+		ID:         cleintID,
 		Name:       name,
 		Connection: conn,
 		RoomCode:   roomCode,
