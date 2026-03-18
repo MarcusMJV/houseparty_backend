@@ -3,7 +3,9 @@ package room
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -49,7 +51,9 @@ func (m *RoomManager) AddClient(client *Client) {
 
 	room := m.Rooms[client.RoomCode]
 
-	// Cancel any pending reconnect timer for this client ID
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
 	if timer, ok := room.ReconnectTimers[client.ID]; ok {
 		timer.Stop()
 		delete(room.ReconnectTimers, client.ID)
@@ -66,7 +70,9 @@ func (m *RoomManager) RemoveClient(client *Client) {
 	m.mu.Lock()
 	room := m.Rooms[client.RoomCode]
 
+	room.mu.Lock()
 	if _, ok := room.Clients[client]; !ok {
+		room.mu.Unlock()
 		m.mu.Unlock()
 		return
 	}
@@ -79,28 +85,45 @@ func (m *RoomManager) RemoveClient(client *Client) {
 	clientID := client.ID
 	clientName := client.Name
 
-	timer := time.AfterFunc(30*time.Second, func() {
+	timer := time.AfterFunc(3*time.Second, func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		// If client reconnected, ClientHistory entry was removed — do nothing
+		room.mu.Lock()
+
 		if _, pending := room.ClientHistory[clientName]; !pending {
+			room.mu.Unlock()
 			return
 		}
 
 		delete(room.ClientHistory, clientName)
 		delete(room.ReconnectTimers, clientID)
 
+		if room.HostID == clientID {
+			newHost := room.getNewHost()
+			if newHost != nil {
+				room.setNewHost(newHost)
+			} else {
+				room.mu.Unlock()
+				m.DeleteRoom(room.Code)
+				return
+			}
+		}
+
 		payload, err := json.Marshal(UserLeftPayload{Name: clientName, ID: clientID})
 		if err != nil {
+			room.mu.Unlock()
 			return
 		}
 		event := Event{Type: "user_left", Payload: payload}
 		for c := range room.Clients {
 			c.Egress <- event
 		}
+		room.mu.Unlock()
 	})
+
 	room.ReconnectTimers[clientID] = timer
+	room.mu.Unlock()
 
 	m.mu.Unlock()
 }
@@ -110,8 +133,11 @@ func (m *RoomManager) CheckClientHistory(roomCode string, key string) (string, b
 	defer m.mu.Unlock()
 
 	room := m.Rooms[roomCode]
+
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
 	if id, ok := room.ClientHistory[key]; ok {
-		defer delete(room.ClientHistory, key)
 		return id, true
 	}
 
@@ -128,12 +154,19 @@ func NewRoomManager() *RoomManager {
 	return m
 }
 
+func (m *RoomManager) DeleteRoom(code string) {
+	fmt.Println("ROOM DELETED")
+	delete(m.Rooms, code)
+}
+
 func (m *RoomManager) SetupEventHandlers() {
 	m.Handlers["join-room"] = JoinRoomEvent
 	m.Handlers["search-song"] = SearchSongEvent
 	m.Handlers["add-song"] = AddSong
 	m.Handlers["song-ended"] = SongEnded
 	m.Handlers["song-skip-vote"] = VoteToSkipSong
+	m.Handlers["selected-new-host"] = SelectedNewHost
+	m.Handlers["song-started"] = UpdateStartTime
 }
 
 func (m *RoomManager) ServeWS() gin.HandlerFunc {
@@ -173,4 +206,25 @@ func (m *RoomManager) routeEvent(event Event, c *Client) error {
 		return errors.New("no handler for event type")
 	}
 	return nil
+}
+
+func (m *RoomManager) CheckClientName(name string, code string, num int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	room := m.Rooms[code]
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	return m.checkClientName(name, code, num)
+}
+
+// checkClientName is called from CheckClientName which already holds both m.mu and room.mu.
+func (m *RoomManager) checkClientName(name string, code string, num int) string {
+	for member, ok := range m.Rooms[code].Clients {
+		if ok && member.Name == name {
+			return m.checkClientName(name+"_"+strconv.Itoa(num), code, num+1)
+		}
+	}
+	return name
 }

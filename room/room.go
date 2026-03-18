@@ -3,6 +3,7 @@ package room
 import (
 	"encoding/json"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/marcusvorster/houseparty_backend/config"
@@ -10,6 +11,7 @@ import (
 )
 
 type Room struct {
+	mu                   sync.RWMutex
 	Code                 string
 	HostID               string
 	Clients              map[*Client]bool
@@ -33,7 +35,9 @@ func GenerateRoomCode(length int) string {
 	return string(code)
 }
 
-func (r *Room) HandleSongChange() error {
+// handleSongChange is the lock-free inner implementation.
+// Callers must hold r.mu before calling.
+func (r *Room) handleSongChange() error {
 	if len(r.Playlist) > 0 {
 		token, err := config.GetAccessToken()
 		if err != nil {
@@ -77,7 +81,15 @@ func (r *Room) HandleSongChange() error {
 
 }
 
-func (r *Room) HandleSkipVote(user string) error {
+func (r *Room) HandleSongChange() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.handleSongChange()
+}
+
+// handleSkipVote is the lock-free inner implementation.
+// Callers must hold r.mu before calling.
+func (r *Room) handleSkipVote(user string) error {
 	r.SkipRecord = append(r.SkipRecord, user)
 
 	payload, err := json.Marshal(VoteToSkipPayload{User: user})
@@ -85,8 +97,8 @@ func (r *Room) HandleSkipVote(user string) error {
 		return err
 	}
 
-	if len(r.SkipRecord)*2 >= len(r.Clients) {
-		err := r.HandleSongChange()
+	if len(r.SkipRecord)*2 > len(r.Clients) {
+		err := r.handleSongChange()
 		if err != nil {
 			return err
 		}
@@ -111,4 +123,93 @@ func (r *Room) HandleSkipVote(user string) error {
 		}
 	}
 	return nil
+}
+
+func (r *Room) HandleSkipVote(user string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.handleSkipVote(user)
+}
+
+// getNewHost is the lock-free inner implementation.
+// Callers must hold r.mu before calling.
+func (r *Room) getNewHost() *Client {
+	var newHost *Client
+	for memeber, ok := range r.Clients {
+		if ok {
+			newHost = memeber
+			break
+		}
+	}
+	return newHost
+}
+
+func (r *Room) GetNewHost() *Client {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.getNewHost()
+}
+
+// setNewHost is the lock-free inner implementation.
+// Callers must hold r.mu before calling.
+func (r *Room) setNewHost(host *Client) error {
+	token, err := config.GetAccessToken()
+	if err != nil {
+		return err
+	}
+
+	r.HostID = host.ID
+
+	payload, err := json.Marshal(HostUpdatedPayload{Message: "You Are Now Host", Host: r.HostID, Token: token, CurrentSongStartTime: r.CurrentSongStartTime})
+	if err != nil {
+		return err
+	}
+	event := Event{
+		Type:    "set_host",
+		Payload: payload,
+	}
+
+	host.Egress <- event
+
+	payload, err = json.Marshal(HostUpdatedPayload{Message: "Host Updated", Host: r.HostID, Token: "", CurrentSongStartTime: r.CurrentSongStartTime})
+	if err != nil {
+		return err
+	}
+	event = Event{
+		Type:    "update_host",
+		Payload: payload,
+	}
+
+	for member, ok := range r.Clients {
+		if member != host {
+			if ok {
+				member.Egress <- event
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *Room) SetNewHost(host *Client) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.setNewHost(host)
+}
+
+// getClient is the lock-free inner implementation.
+// Callers must hold r.mu before calling.
+func (r *Room) getClient(id string) *Client {
+	for member := range r.Clients {
+		if member.ID == id {
+			return member
+		}
+	}
+	return nil
+}
+
+func (r *Room) GetClient(id string) *Client {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.getClient(id)
 }

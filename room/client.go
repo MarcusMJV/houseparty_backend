@@ -34,6 +34,7 @@ func generateClientID() string {
 
 func newClient(name string, conn *websocket.Conn, roomCode string, manager *RoomManager) *Client {
 	var cleintID string
+	name = manager.CheckClientName(name, roomCode, 2)
 	if id, ok := manager.CheckClientHistory(roomCode, name); ok {
 		cleintID = id
 	} else {

@@ -42,6 +42,10 @@ type SearchSongPayload struct {
 	Songs []spotify.Song `json:"songs"`
 }
 
+type UpdateStartTimePayload struct {
+	StartTime time.Time `json:"start_time"`
+}
+
 type VoteToSkipPayload struct {
 	User string `json:"user"`
 }
@@ -59,8 +63,23 @@ type AuthTokenPayload struct {
 	Token string `json:"token"`
 }
 
+type HostUpdatedPayload struct {
+	Message              string    `json:"message"`
+	Host                 string    `json:"host"`
+	Token                string    `json:"token"`
+	CurrentSongStartTime time.Time `json:"current_song_start_time"`
+}
+
+type SelectedNewHostPayload struct {
+	ID string `json:"id"`
+}
+
 func JoinRoomEvent(event Event, c *Client) error {
 	room := c.GetClientRoom()
+
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
 	members := make(map[string]string)
 
 	for member, ok := range room.Clients {
@@ -102,14 +121,16 @@ func JoinRoomEvent(event Event, c *Client) error {
 		return err
 	}
 
-	userJoinedEvent := Event{
-		Type:    "user_joined",
-		Payload: userJoinedPayload,
-	}
+	if _, ok := room.ClientHistory[c.Name]; !ok {
+		userJoinedEvent := Event{
+			Type:    "user_joined",
+			Payload: userJoinedPayload,
+		}
 
-	for member, ok := range room.Clients {
-		if ok && member != c {
-			member.Egress <- userJoinedEvent
+		for member, ok := range room.Clients {
+			if ok && member != c {
+				member.Egress <- userJoinedEvent
+			}
 		}
 	}
 
@@ -164,6 +185,9 @@ func AddSong(event Event, c *Client) error {
 		return err
 	}
 
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
 	if room.CurrentSong == nil {
 		payload, err := json.Marshal(SetSongPayload{Song: song, Token: token})
 		if err != nil {
@@ -204,12 +228,11 @@ func AddSong(event Event, c *Client) error {
 
 func SongEnded(event Event, c *Client) error {
 	room := c.GetClientRoom()
-	err := room.HandleSongChange()
-	if err != nil {
-		return err
-	}
 
-	return nil
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	return room.handleSongChange()
 }
 
 func VoteToSkipSong(event Event, c *Client) error {
@@ -220,10 +243,45 @@ func VoteToSkipSong(event Event, c *Client) error {
 	}
 
 	room := c.GetClientRoom()
-	err = room.HandleSkipVote(skipSongPayload.User)
+
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	return room.handleSkipVote(skipSongPayload.User)
+}
+
+func SelectedNewHost(event Event, c *Client) error {
+	var newHostPayload SelectedNewHostPayload
+	err := json.Unmarshal(event.Payload, &newHostPayload)
 	if err != nil {
 		return err
 	}
+	room := c.GetClientRoom()
 
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	newHost := room.getClient(newHostPayload.ID)
+	return room.setNewHost(newHost)
+}
+
+func UpdateStartTime(event Event, c *Client) error {
+	var startTimePayload UpdateStartTimePayload
+	err := json.Unmarshal(event.Payload, &startTimePayload)
+	if err != nil {
+		return err
+	}
+	room := c.GetClientRoom()
+
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	room.CurrentSongStartTime = startTimePayload.StartTime
+	event.Type = "update_start_time"
+	for member := range room.Clients {
+		if member.ID != room.HostID {
+			member.Egress <- event
+		}
+	}
 	return nil
 }
