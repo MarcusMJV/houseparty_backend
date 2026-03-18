@@ -9,7 +9,7 @@ import (
 
 func Cors() gin.HandlerFunc {
 	return cors.New(cors.Config{
-		AllowOrigins:     []string{"https://localhost:5173", "https://b6fb-2c0f-ef20-2109-c500-cc0b-667e-e022-2793.ngrok-free.app", "https://accounts.spotify.com", "https://hp-frontend.up.railway.app"},
+		AllowOrigins:     []string{"https://localhost:5173", "https://b6fb-2c0f-ef20-2109-c500-cc0b-667e-e022-2793.ngrok-free.app", "https://accounts.spotify.com", "https://housepartyfrontend-production.up.railway.app/"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
