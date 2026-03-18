@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/marcusvorster/houseparty_backend/config"
@@ -30,7 +31,11 @@ func main() {
 	server := gin.Default()
 	server.Use(middleware.Cors())
 	RegisterRoutes(server)
-	server.Run(":8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	server.Run(":" + port)
 }
 
 func RegisterRoutes(server *gin.Engine) {
