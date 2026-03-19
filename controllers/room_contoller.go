@@ -46,5 +46,9 @@ func SpotifyExchange(context *gin.Context) {
 }
 
 func JoinRoom(context *gin.Context) {
+	if !roomManager.CheckIfRoomExists(context.Param("room_code")) {
+		context.JSON(http.StatusBadRequest, gin.H{"message": "Room code is incorrect."})
+		return
+	}
 	roomManager.ServeWS()(context)
 }

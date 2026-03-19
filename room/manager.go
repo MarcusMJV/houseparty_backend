@@ -219,7 +219,12 @@ func (m *RoomManager) CheckClientName(name string, code string, num int) string 
 	return m.checkClientName(name, code, num)
 }
 
-// checkClientName is called from CheckClientName which already holds both m.mu and room.mu.
+func (m *RoomManager) CheckIfRoomExists(code string) bool {
+	if _, ok := m.Rooms[code]; ok {
+		return true
+	}
+	return false
+}
 func (m *RoomManager) checkClientName(name string, code string, num int) string {
 	for member, ok := range m.Rooms[code].Clients {
 		if ok && member.Name == name {
