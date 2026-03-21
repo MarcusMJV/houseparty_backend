@@ -190,7 +190,7 @@ func checkOrigin(r *http.Request) bool {
 	switch origin {
 	case "https://localhost:5173":
 		return true
-	case "https://housepartyfrontend-production.up.railway.app":
+	case "https://housepartydemo.up.railway.app":
 		return true
 	default:
 		return false
